@@ -1,0 +1,37 @@
+project_id = "quadratic"
+
+[api]
+port = 54321
+schemas = ["public", "graphql_public"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+port = 54323
+
+[auth]
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["http://localhost:5173/", "https://jumbocode.github.io/Quadratic/"]
+enable_signup = true
+
+[auth.external.github]
+enabled = true
+client_id = "env(GITHUB_OAUTH_CLIENT_ID)"
+secret = "env(GITHUB_OAUTH_CLIENT_SECRET)"
+redirect_uri = ""
+
+# Called by GitHub, Slack or pg_cron, so they authenticate themselves instead of with a user JWT.
+[functions.github-webhook]
+verify_jwt = false
+
+[functions.slack-oauth]
+verify_jwt = false
+
+[functions.dispatch]
+verify_jwt = false
+
+[functions.cron-tick]
+verify_jwt = false

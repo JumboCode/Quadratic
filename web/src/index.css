@@ -1,0 +1,105 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Bricolage Grotesque', 'Inter', ui-sans-serif, sans-serif;
+
+  /* JumboCode green */
+  --color-brand-50: #effcf3;
+  --color-brand-100: #d8f7e2;
+  --color-brand-200: #b3edc8;
+  --color-brand-300: #7fdea5;
+  --color-brand-400: #48c67d;
+  --color-brand-500: #2ead5b;
+  --color-brand-600: #208c48;
+  --color-brand-700: #1c6f3c;
+  --color-brand-800: #1a5833;
+  --color-brand-900: #17482c;
+  --color-brand-950: #082815;
+}
+
+/* Semantic surface tokens, swapped for dark mode */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+}
+
+:root {
+  --bg: #f4faf6;
+  --surface: #ffffff;
+  --surface-2: #ecf6ef;
+  --line: #dbeae0;
+  --ink: #10231a;
+  --muted: #5b7466;
+  --accent: #2ead5b;
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #0a130e;
+  --surface: #101c16;
+  --surface-2: #16261e;
+  --line: #22372c;
+  --ink: #e4f1e9;
+  --muted: #8aa596;
+  --accent: #48c67d;
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* Slim scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.prose-q {
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.prose-q h1 { font-family: var(--font-display); font-size: 1.5rem; font-weight: 700; margin: 1rem 0 0.5rem; }
+.prose-q h2 { font-family: var(--font-display); font-size: 1.25rem; font-weight: 700; margin: 1rem 0 0.5rem; }
+.prose-q h3 { font-weight: 600; margin: 0.75rem 0 0.25rem; }
+.prose-q p { margin: 0.5rem 0; }
+.prose-q ul { list-style: disc; padding-left: 1.4rem; margin: 0.5rem 0; }
+.prose-q ol { list-style: decimal; padding-left: 1.4rem; margin: 0.5rem 0; }
+.prose-q li:has(> input[type='checkbox']) { list-style: none; margin-left: -1.2rem; }
+.prose-q a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.prose-q code { background: var(--surface-2); padding: 0.1rem 0.35rem; border-radius: 0.35rem; font-size: 0.85em; }
+.prose-q pre { background: var(--surface-2); padding: 0.75rem 1rem; border-radius: 0.75rem; overflow-x: auto; margin: 0.75rem 0; }
+.prose-q pre code { background: none; padding: 0; }
+.prose-q blockquote { border-left: 3px solid var(--accent); padding-left: 0.9rem; color: var(--muted); margin: 0.75rem 0; }
+.prose-q table { border-collapse: collapse; margin: 0.75rem 0; }
+.prose-q th, .prose-q td { border: 1px solid var(--line); padding: 0.3rem 0.6rem; }
+.prose-q hr { border-color: var(--line); margin: 1rem 0; }
+.prose-q img { max-width: 100%; border-radius: 0.75rem; }
+
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-6deg); }
+  75% { transform: rotate(6deg); }
+}
+.hover-wiggle:hover { animation: wiggle 0.4s ease-in-out; }

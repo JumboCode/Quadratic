@@ -1,0 +1,28 @@
+name: Deploy database & Edge Functions
+
+on:
+  push:
+    branches: [main]
+    paths: ['supabase/**', '.github/workflows/deploy-supabase.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: supabase
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Skips quietly until the Supabase project is set up (docs/SETUP.md, step 6).
+    if: ${{ vars.SUPABASE_PROJECT_REF != '' }}
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: supabase link --project-ref ${{ vars.SUPABASE_PROJECT_REF }}
+      - run: supabase db push
+      - run: supabase functions deploy --project-ref ${{ vars.SUPABASE_PROJECT_REF }}
