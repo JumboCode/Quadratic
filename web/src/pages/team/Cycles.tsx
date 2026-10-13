@@ -62,7 +62,7 @@ export function Cycles() {
                       const s = stats(c);
                       const pct = s.total ? Math.round((s.done / s.total) * 100) : 0;
                       return (
-                        <Link key={c.id} to={c.id}>
+                        <Link key={c.id} to={`/team/${team.key}/cycles/${c.id}`}>
                           <Card className={cn('p-4 transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md', g.title === 'Current' && 'border-brand-300 ring-2 ring-brand-500/15')}>
                             <div className="flex items-center gap-2">
                               <span className="font-display font-bold">{cycleName(c)}</span>

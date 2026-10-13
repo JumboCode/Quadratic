@@ -18,14 +18,20 @@ import { useTeamCtx } from './TeamLayout';
 
 type Tab = 'general' | 'members' | 'people' | 'github' | 'workflow' | 'notifications';
 
+const TABS: Tab[] = ['general', 'members', 'people', 'github', 'workflow', 'notifications'];
+
 export function Settings() {
-  const { tab = 'general' } = useParams();
+  const { team } = useTeamCtx();
+  const params = useParams();
   const navigate = useNavigate();
+  // Unknown tab in the URL (old link, typo) falls back to General instead of a blank page.
+  const tab: Tab = TABS.includes(params.tab as Tab) ? (params.tab as Tab) : 'general';
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-4 sm:p-6">
       <Tabs<Tab>
-        value={tab as Tab}
-        onChange={(t) => navigate(`../settings/${t}`, { relative: 'path', replace: true })}
+        value={tab}
+        // Absolute path: a relative "../settings/x" breaks once you're already on /settings/<tab>.
+        onChange={(t) => navigate(`/team/${team.key}/settings/${t}`, { replace: true })}
         tabs={[
           { value: 'general', label: 'General' },
           { value: 'members', label: <span className="flex items-center gap-1.5"><Users className="size-3.5" /> Leadership</span> },

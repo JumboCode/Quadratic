@@ -75,7 +75,9 @@ export function TeamLayout() {
           ))}
         </nav>
       </header>
-      <div className="min-h-0 flex-1">
+      {/* Keyed by team so switching teams remounts the page. Otherwise forms seeded from the
+          previous team (e.g. Settings → General) would save that team's values onto this one. */}
+      <div key={team.id} className="min-h-0 flex-1">
         <Outlet context={{ team, bundle } satisfies TeamCtx} />
       </div>
       <IssuePanel identifier={openId} onClose={close} />

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { eachDayOfInterval, format, parseISO } from 'date-fns';
 import confetti from 'canvas-confetti';
@@ -23,6 +23,8 @@ export function CycleDetail() {
   const update = useUpdateIssue();
   const db = useDb([['cycles', team.id]]);
   const [goal, setGoal] = useState<string | null>(null);
+  // Same component instance is reused across sprints; don't carry an edited goal to the next one.
+  useEffect(() => setGoal(null), [cycleId]);
   const today = todayISO();
 
   const inCycle = useMemo(() => issues.filter((i) => i.cycle_id === cycleId), [issues, cycleId]);
@@ -72,7 +74,7 @@ export function CycleDetail() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
-      <Link to=".." relative="path" className="inline-flex items-center gap-1 text-sm text-muted hover:text-ink">
+      <Link to={`/team/${team.key}/cycles`} className="inline-flex items-center gap-1 text-sm text-muted hover:text-ink">
         <ArrowLeft className="size-4" /> All sprints
       </Link>
       <div className="flex flex-wrap items-start gap-3">

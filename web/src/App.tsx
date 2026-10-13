@@ -1,8 +1,8 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './lib/auth';
 import { isConfigured } from './lib/supabase';
 import { Layout } from './components/Layout';
-import { PageLoader } from './components/ui';
+import { Button, Empty, PageLoader } from './components/ui';
 import { Login, NoAccess, SetupNeeded } from './pages/Gate';
 import { Home } from './pages/Home';
 import { Inbox } from './pages/Inbox';
@@ -20,6 +20,15 @@ import { ProjectPage } from './pages/ProjectPage';
 import { DocPage } from './pages/DocPage';
 import { ClubRoadmap } from './pages/ClubRoadmap';
 import { Admin } from './pages/Admin';
+
+function NotFound() {
+  const { pathname } = useLocation();
+  return (
+    <Empty title="Page not found" action={<Link to="/"><Button variant="primary">Back to My work</Button></Link>}>
+      Nothing lives at <code>{pathname}</code>. The link may be out of date.
+    </Empty>
+  );
+}
 
 export default function App() {
   const { session, loading, profile, roles } = useAuth();
@@ -52,7 +61,8 @@ export default function App() {
           <Route path="settings" element={<Settings />} />
           <Route path="settings/:tab" element={<Settings />} />
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* Show a real 404 instead of silently redirecting, so broken links are visible. */}
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
   );
