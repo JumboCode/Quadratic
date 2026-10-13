@@ -49,3 +49,5 @@ See **[docs/SETUP.md](docs/SETUP.md)**. The short version:
 ```sh
 cd web && npm install && npm run dev
 ```
+
+Enjoy!
