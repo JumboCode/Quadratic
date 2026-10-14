@@ -41,8 +41,10 @@ This is what creates issues and listens to PRs. It's separate from the OAuth App
 1. Go to **github.com/organizations/JumboCode/settings/apps** and create a **New GitHub App** with these settings:
    - Name: e.g. `Quadratic JumboCode`. The slug (lowercase, dashes) becomes `GITHUB_APP_SLUG`.
    - Homepage URL: `https://jumbocode.github.io/Quadratic/`
-   - Webhook URL: `https://<ref>.supabase.co/functions/v1/github-webhook`
-   - Webhook secret: a long random string. This becomes `GITHUB_WEBHOOK_SECRET`.
+   - Leave **Callback URL / Redirect URI** empty, and leave "Request user authorization (OAuth)" unchecked. Sign-in uses the separate OAuth App from step 2.
+   - Under **Webhook**, check "Active" and set:
+     - **Webhook URL:** `https://<ref>.supabase.co/functions/v1/github-webhook`. Put this here, not in the Callback URL field.
+     - **Webhook secret:** a long random string. This becomes `GITHUB_WEBHOOK_SECRET`.
    - **Repository permissions:**
      - Issues: *Read & write*
      - Pull requests: *Read*
@@ -51,12 +53,7 @@ This is what creates issues and listens to PRs. It's separate from the OAuth App
    - **Subscribe to events:** Issues, Issue comment, Pull request, Pull request review, Push.
    - Where can it be installed: *Only on this account*.
 2. After creating it, note the **App ID**.
-3. Generate a **private key**. GitHub downloads a PKCS#1 `.pem` file. Convert it to PKCS#8 and put it on one line:
-   ```sh
-   openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in quadratic.private-key.pem -out key-pkcs8.pem
-   awk '{printf "%s\\n", $0}' key-pkcs8.pem   # paste the output as GITHUB_APP_PRIVATE_KEY
-   ```
-   Delete the `.pem` files afterwards; they're in `.gitignore` but shouldn't stay on your laptop.
+3. Generate a **private key**. GitHub downloads a `.pem` file. Open it in a text editor, copy **everything** (including the `-----BEGIN…` and `-----END…` lines), and paste it into Supabase as the `GITHUB_APP_PRIVATE_KEY` secret (Edge Functions → Secrets). You don't need to convert it or escape the newlines; the functions handle any paste format. Delete the `.pem` file afterwards.
 4. Click **Install App** and install it on the JumboCode org. You can pick only the client project repos.
 
 ## 4. Slack app (reminders)
@@ -169,6 +166,6 @@ cd supabase/tests && npm install && npm test  # schema, RLS and sync logic on an
 ## Troubleshooting
 
 - **Issues don't appear on GitHub.** In the SQL editor, run `select * from jobs order by id desc`. Then check `last_error` and the `dispatch` function logs. The usual causes are missing Vault secrets (step 5) or a repo the App isn't installed on.
-- **"GitHub App isn't configured".** Check the `GITHUB_APP_*` secrets and that the private key is PKCS#8 with `\n` escapes.
+- **"GitHub App isn't configured".** The message says what's wrong. "Truncated" or "ASN.1 DER message is incomplete" means only the first line of the private key was saved, so re-paste the whole `.pem` in Supabase → Edge Functions → Secrets.
 - **No Slack DMs.** The dev needs a Slack ID (Settings → Developers), the toggle must be on, and reminders only send during the team's chosen hour.
 - **Login loops back to the sign-in page.** The site URL must be listed under Supabase → Authentication → URL Configuration → Redirect URLs.

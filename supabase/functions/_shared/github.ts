@@ -1,15 +1,19 @@
 import { App } from 'npm:@octokit/app@15';
-import { env } from './http.ts';
+import { env, HttpError } from './http.ts';
+import { normalizePrivateKey } from './pem.ts';
 
 let app: App | null = null;
 
 export function githubApp(): App {
   if (!app) {
-    app = new App({
-      appId: env('GITHUB_APP_ID'),
-      // GitHub hands out PKCS#1 keys; Deno's WebCrypto needs PKCS#8 (see docs/SETUP.md).
-      privateKey: env('GITHUB_APP_PRIVATE_KEY').replace(/\\n/g, '\n'),
-    });
+    let privateKey: string;
+    try {
+      // Handles any paste format, and converts GitHub's PKCS#1 key to the PKCS#8 WebCrypto needs.
+      privateKey = normalizePrivateKey(env('GITHUB_APP_PRIVATE_KEY'));
+    } catch (e) {
+      throw new HttpError(500, (e as Error).message);
+    }
+    app = new App({ appId: env('GITHUB_APP_ID'), privateKey });
   }
   return app;
 }
