@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { addDays, differenceInCalendarDays, eachMonthOfInterval, endOfMonth, format, max as maxDate, min as minDate, parseISO, startOfMonth } from 'date-fns';
-import { CalendarPlus } from 'lucide-react';
+import { CalendarPlus, Check } from 'lucide-react';
 import { useDb } from '../lib/queries';
 import type { CalendarEvent, Cycle, Milestone, Project, ProjectDependency, Team } from '../lib/types';
 import { cn, cycleName, fmtDate } from '../lib/utils';
@@ -12,12 +12,32 @@ const LABEL_W = 230;
 const ZOOMS = { week: 18, month: 5, quarter: 2.2 } as const;
 type Zoom = keyof typeof ZOOMS;
 
-const EVENT_STYLE: Record<CalendarEvent['kind'], { bg: string; label: string }> = {
-  break: { bg: 'rgba(148, 163, 184, 0.16)', label: '🏖️' },
-  finals: { bg: 'rgba(239, 68, 68, 0.10)', label: '📚' },
-  event: { bg: 'rgba(46, 173, 91, 0.10)', label: '🎉' },
-  deadline: { bg: 'rgba(234, 179, 8, 0.14)', label: '⏰' },
+const EVENT_STYLE: Record<CalendarEvent['kind'], { bg: string; label: string; name: string }> = {
+  break: { bg: 'rgba(148, 163, 184, 0.16)', label: '🏖️', name: 'Breaks' },
+  finals: { bg: 'rgba(239, 68, 68, 0.10)', label: '📚', name: 'Finals' },
+  event: { bg: 'rgba(46, 173, 91, 0.10)', label: '🎉', name: 'Events' },
+  deadline: { bg: 'rgba(234, 179, 8, 0.14)', label: '⏰', name: 'Deadlines' },
 };
+const EVENT_KINDS = Object.keys(EVENT_STYLE) as CalendarEvent['kind'][];
+
+// Which club-date kinds this viewer has hidden. Per-browser convenience only, so storage
+// failures (private mode, blocked site data) just mean everything shows.
+const HIDDEN_KEY = 'quadratic-timeline-hidden-kinds';
+function loadHiddenKinds(): Set<CalendarEvent['kind']> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? '[]');
+    return new Set(Array.isArray(raw) ? raw.filter((k) => EVENT_KINDS.includes(k)) : []);
+  } catch {
+    return new Set();
+  }
+}
+function saveHiddenKinds(kinds: Set<CalendarEvent['kind']>) {
+  try {
+    localStorage.setItem(HIDDEN_KEY, JSON.stringify([...kinds]));
+  } catch {
+    // storage unavailable; the toggle still works for this visit
+  }
+}
 
 interface Props {
   projects: Project[];
@@ -42,6 +62,15 @@ export function Timeline({ projects, progress, milestones, dependencies, events,
   const db = useDb([['projects'], ['project']]);
   const [zoom, setZoom] = useState<Zoom>('month');
   const [drag, setDrag] = useState<Drag | null>(null);
+  const [hiddenKinds, setHiddenKinds] = useState<Set<CalendarEvent['kind']>>(loadHiddenKinds);
+  const shownEvents = useMemo(() => events.filter((e) => !hiddenKinds.has(e.kind)), [events, hiddenKinds]);
+  const toggleKind = (k: CalendarEvent['kind']) => {
+    const next = new Set(hiddenKinds);
+    if (next.has(k)) next.delete(k);
+    else next.add(k);
+    saveHiddenKinds(next);
+    setHiddenKinds(next);
+  };
   const scroller = useRef<HTMLDivElement>(null);
   const px = ZOOMS[zoom];
 
@@ -131,12 +160,34 @@ export function Timeline({ projects, progress, milestones, dependencies, events,
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
         <Tabs<Zoom> value={zoom} onChange={setZoom} tabs={[{ value: 'week', label: 'Weeks' }, { value: 'month', label: 'Months' }, { value: 'quarter', label: 'Year' }]} />
-        <div className="flex flex-wrap gap-3 text-xs text-muted">
-          {(Object.keys(EVENT_STYLE) as CalendarEvent['kind'][]).map((k) => (
-            <span key={k} className="flex items-center gap-1">
-              <span className="size-3 rounded-sm border border-line" style={{ background: EVENT_STYLE[k].bg }} /> {EVENT_STYLE[k].label} {k}
-            </span>
-          ))}
+        <div className="flex flex-wrap items-center gap-1.5 text-xs" role="group" aria-label="Show club dates">
+          <span className="mr-0.5 text-muted">Show:</span>
+          {EVENT_KINDS.map((k) => {
+            const on = !hiddenKinds.has(k);
+            const count = events.filter((e) => e.kind === k).length;
+            return (
+              <button
+                key={k}
+                type="button"
+                aria-pressed={on}
+                onClick={() => toggleKind(k)}
+                title={`${on ? 'Hide' : 'Show'} ${EVENT_STYLE[k].name.toLowerCase()} on the timeline`}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium transition',
+                  on ? 'border-line bg-surface text-ink hover:border-brand-300' : 'border-dashed border-line text-muted opacity-60 hover:opacity-100',
+                )}
+              >
+                <span
+                  className="flex size-3.5 items-center justify-center rounded-[4px] border border-line"
+                  style={{ background: on ? EVENT_STYLE[k].bg : 'transparent' }}
+                >
+                  {on && <Check className="size-2.5 text-ink" strokeWidth={3} />}
+                </span>
+                {EVENT_STYLE[k].label} {EVENT_STYLE[k].name}
+                <span className="tabular-nums text-muted">{count}</span>
+              </button>
+            );
+          })}
         </div>
         <span className="ml-auto text-xs text-muted">Drag bars to reschedule · drag edges to resize</span>
       </div>
@@ -177,7 +228,7 @@ export function Timeline({ projects, progress, milestones, dependencies, events,
               </div>
 
               {/* calendar bands */}
-              {events.map((e) => (
+              {shownEvents.map((e) => (
                 <div
                   key={e.id}
                   className="absolute top-12 border-x border-dashed border-line/60"
