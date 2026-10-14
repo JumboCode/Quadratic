@@ -36,6 +36,19 @@ export function dueLabel(d: string): { text: string; tone: 'late' | 'soon' | 'ok
 
 export const cycleName = (c: { name: string | null; number: number }) => c.name || `Sprint ${c.number}`;
 
+type CycleDates = { starts_on: string; ends_on: string; completed_at: string | null };
+
+/**
+ * Where a sprint stands. A sprint marked complete is "completed" even if its end date hasn't
+ * arrived yet (finished early), so always use this instead of comparing dates directly.
+ */
+export function cycleStatus(c: CycleDates, today = todayISO()): 'current' | 'upcoming' | 'completed' {
+  if (c.completed_at || c.ends_on < today) return 'completed';
+  return c.starts_on <= today ? 'current' : 'upcoming';
+}
+
+export const isCurrentCycle = (c: CycleDates, today = todayISO()) => cycleStatus(c, today) === 'current';
+
 /** Academic year label for a date, e.g. "2026–27" (years start in August). */
 export function academicYear(d = new Date()): string {
   const y = d.getMonth() >= 7 ? d.getFullYear() : d.getFullYear() - 1;

@@ -4,7 +4,7 @@ import { addDays, format, nextMonday, parseISO } from 'date-fns';
 import { CalendarPlus, Plus } from 'lucide-react';
 import { useDb, useIssues } from '../../lib/queries';
 import type { Cycle } from '../../lib/types';
-import { cn, cycleName, fmtDate, todayISO } from '../../lib/utils';
+import { cn, cycleName, cycleStatus, fmtDate, todayISO } from '../../lib/utils';
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageLoader, Progress, Select } from '../../components/ui';
 import { VelocityChart } from '../../components/Charts';
 import { useTeamCtx } from './TeamLayout';
@@ -25,9 +25,12 @@ export function Cycles() {
   };
 
   const cycles = [...bundle.cycles].sort((a, b) => b.starts_on.localeCompare(a.starts_on));
-  const current = cycles.filter((c) => c.starts_on <= today && today <= c.ends_on);
-  const upcoming = cycles.filter((c) => c.starts_on > today).reverse();
-  const past = cycles.filter((c) => c.ends_on < today);
+  const current = cycles.filter((c) => cycleStatus(c, today) === 'current');
+  const upcoming = cycles.filter((c) => cycleStatus(c, today) === 'upcoming').reverse();
+  // Includes sprints completed early, newest first.
+  const past = cycles
+    .filter((c) => cycleStatus(c, today) === 'completed')
+    .sort((a, b) => (b.completed_at ?? b.ends_on).localeCompare(a.completed_at ?? a.ends_on));
   const velocity = [...past].reverse().slice(-8).map((c) => ({ name: `S${c.number}`, points: stats(c).donePoints }));
 
   return (
@@ -51,7 +54,7 @@ export function Cycles() {
           {[
             { title: 'Current', list: current },
             { title: 'Upcoming', list: upcoming },
-            { title: 'Past', list: past },
+            { title: 'Completed', list: past },
           ].map(
             (g) =>
               g.list.length > 0 && (
@@ -67,6 +70,7 @@ export function Cycles() {
                             <div className="flex items-center gap-2">
                               <span className="font-display font-bold">{cycleName(c)}</span>
                               {g.title === 'Current' && <Badge color="#2ead5b">Active</Badge>}
+                              {c.completed_at && c.completed_at.slice(0, 10) < c.ends_on && <Badge color="#5b6fd6">Done early 🎉</Badge>}
                               <span className="ml-auto text-xs text-muted">{fmtDate(c.starts_on)} – {fmtDate(c.ends_on)}</span>
                             </div>
                             {c.goal && <p className="mt-1 line-clamp-1 text-sm text-muted">🎯 {c.goal}</p>}

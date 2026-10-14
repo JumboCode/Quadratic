@@ -93,6 +93,8 @@ export interface Cycle {
   starts_on: string;
   ends_on: string;
   completed_at: string | null;
+  carried_over_count: number | null;
+  carried_over_points: number | null;
 }
 
 export interface CycleSnapshot {

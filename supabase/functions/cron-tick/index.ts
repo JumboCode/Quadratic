@@ -127,12 +127,13 @@ async function tickTeam(team: Team, slackReady: boolean) {
   // ---- Sprints ------------------------------------------------------------
   const { data: cycles } = await admin
     .from('cycles')
-    .select('id, number, name, goal, starts_on, ends_on, completed_at')
+    .select('id, number, name, goal, starts_on, ends_on, completed_at, carried_over_count, carried_over_points')
     .eq('team_id', team.id)
     .order('starts_on');
 
   for (const c of cycles ?? []) {
-    const active = c.starts_on <= today && today <= c.ends_on;
+    // A sprint completed early is over; snapshotting it would skew its burndown.
+    const active = !c.completed_at && c.starts_on <= today && today <= c.ends_on;
     if (active) await admin.rpc('snapshot_cycle', { p_cycle: c.id, p_day: today });
 
     // Start digest on the first day, at the reminder hour or later.
@@ -150,6 +151,19 @@ async function tickTeam(team: Team, slackReady: boolean) {
         if (await sendOnce(team.id, 'cycle_end', `cycle_end:${c.id}`, () => postCycleEnd(team, c, stats, next))) {
           out.digests++;
         }
+      }
+    } else if (
+      // Completed by hand (often early), or a digest that failed above: post it once, from the
+      // carry-over numbers saved at completion. The 2-day window avoids digesting old sprints.
+      c.completed_at && Date.now() - Date.parse(c.completed_at) < 2 * 86_400_000 &&
+      slackReady && s.sprint_end_digest && team.slack_channel_id
+    ) {
+      const next = (cycles ?? []).find((n) => n.starts_on > c.ends_on);
+      const st = await cycleStats(c.id); // only finished work is left in the sprint now
+      const carried = c.carried_over_count ?? 0;
+      const stats = { ...st, total: st.total + carried, carried, points: st.points + (c.carried_over_points ?? 0) };
+      if (await sendOnce(team.id, 'cycle_end', `cycle_end:${c.id}`, () => postCycleEnd(team, c, stats, next))) {
+        out.digests++;
       }
     }
   }
@@ -176,7 +190,10 @@ async function cycleStats(cycleId: string) {
   };
 }
 
-type Cycle = { id: string; number: number; name: string | null; goal: string | null; starts_on: string; ends_on: string };
+type Cycle = {
+  id: string; number: number; name: string | null; goal: string | null; starts_on: string; ends_on: string;
+  completed_at?: string | null;
+};
 const cycleName = (c: Cycle) => c.name || `Sprint ${c.number}`;
 
 async function postCycleStart(team: Team, c: Cycle) {
@@ -194,7 +211,11 @@ async function postCycleStart(team: Team, c: Cycle) {
 async function postCycleEnd(team: Team, c: Cycle, st: Awaited<ReturnType<typeof cycleStats>>, next?: Cycle) {
   const pct = st.total ? Math.round((st.done / st.total) * 100) : 0;
   const cheer = pct >= 90 ? '🎉 Crushed it!' : pct >= 60 ? '💪 Solid sprint.' : '🌱 Onward.';
-  const text = `🏆 *${esc(cycleName(c))}* is wrapped for ${team.emoji} *${esc(team.name)}*. ${cheer}`;
+  const daysEarly = c.completed_at
+    ? Math.round((Date.parse(c.ends_on) - Date.parse(c.completed_at.slice(0, 10))) / 86_400_000)
+    : 0;
+  const early = daysEarly > 0 ? ` Finished *${daysEarly} day${daysEarly > 1 ? 's' : ''} early* ⚡` : '';
+  const text = `🏆 *${esc(cycleName(c))}* is wrapped for ${team.emoji} *${esc(team.name)}*. ${cheer}${early}`;
   await postMessage(team.slack_channel_id!, text, [
     section(text),
     section(`✅ *${st.done}/${st.total}* issues done (${pct}%) · *${st.donePoints}/${st.points}* points` +

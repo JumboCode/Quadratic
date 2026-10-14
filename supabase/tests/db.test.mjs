@@ -140,6 +140,9 @@ const snap = (await q(`select * from cycle_snapshots where cycle_id = $1`, [c1.i
 ok(snap && snap.completed_count === 1, `snapshot: ${snap?.completed_count}/${snap?.scope_count} done`);
 const rolled = (await as(B, () => q(`select rollover_cycle($1, $2) n`, [c1.id, c2.id])))[0].n;
 ok(rolled === 2, `rollover moved ${rolled} unfinished issues (done & canceled stay)`);
+const c1After = (await q(`select completed_at, carried_over_count, carried_over_points from cycles where id = $1`, [c1.id]))[0];
+ok(c1After.completed_at !== null && c1After.carried_over_count === 2 && c1After.carried_over_points === 2,
+  `completed sprint records carry-over (${c1After.carried_over_count} issues, ${c1After.carried_over_points} pts) for the digest`);
 ok(await fails(() => as(A, () => q(`select 1`)).then(() => as(B, () => q(`select rollover_cycle($1, null)`, ['00000000-0000-0000-0000-000000000000'])))), 'rollover of unknown cycle rejected');
 
 console.log('\nProjects');

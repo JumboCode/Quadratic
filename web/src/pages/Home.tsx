@@ -7,7 +7,7 @@ import { useAllPeople, useAllStates, useCalendar, useIssues, useMilestones, useP
 import { useTeamBundle } from '../lib/team-bundle';
 import type { Issue, Team } from '../lib/types';
 import { useUI } from '../lib/ui-context';
-import { cycleName, dueLabel, fmtDate, isClosed, todayISO } from '../lib/utils';
+import { cycleName, dueLabel, fmtDate, isClosed, isCurrentCycle, todayISO } from '../lib/utils';
 import { Button, Card, Empty, Progress } from '../components/ui';
 import { Mascot } from '../components/Mascot';
 import { IssueList, useOpenIssue } from '../components/issue/IssueViews';
@@ -96,7 +96,7 @@ function TeamCard({ team }: { team: Team }) {
   const bundle = useTeamBundle(team.id);
   const { data: issues = [] } = useIssues({ teamId: team.id });
   const today = todayISO();
-  const cycle = bundle.cycles.find((c) => c.starts_on <= today && today <= c.ends_on);
+  const cycle = bundle.cycles.find((c) => isCurrentCycle(c, today));
   const inCycle = cycle ? issues.filter((i) => i.cycle_id === cycle.id && bundle.stateById.get(i.state_id)?.category !== 'canceled') : [];
   const done = inCycle.filter((i) => bundle.stateById.get(i.state_id)?.category === 'completed').length;
   const pct = inCycle.length ? Math.round((done / inCycle.length) * 100) : 0;

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { CalendarDays, CircleUser, Folder, RefreshCcw, Tag } from 'lucide-react';
 import type { Cycle, Label, Person, Project, WorkflowState } from '../../lib/types';
-import { cn, cycleName, dueLabel, PRIORITIES, todayISO } from '../../lib/utils';
+import { cn, cycleName, cycleStatus, dueLabel, PRIORITIES, todayISO } from '../../lib/utils';
 import { PriorityIcon, StateIcon } from '../icons';
 import { Avatar, Picker } from '../ui';
 
@@ -131,7 +131,8 @@ export function LabelPicker({ labels, value, onChange }: { labels: Label[]; valu
 export function CyclePicker({ cycles, value, onChange }: { cycles: Cycle[]; value: string | null; onChange: (id: string | null) => void }) {
   const cur = cycles.find((c) => c.id === value);
   const today = todayISO();
-  const usable = cycles.filter((c) => c.ends_on >= today || c.id === value);
+  // Don't offer finished sprints (including ones completed early), but keep the current value visible.
+  const usable = cycles.filter((c) => cycleStatus(c, today) !== 'completed' || c.id === value);
   return (
     <Picker
       value={value}
@@ -142,7 +143,7 @@ export function CyclePicker({ cycles, value, onChange }: { cycles: Cycle[]; valu
         ...usable.map((c) => ({
           value: c.id,
           label: cycleName(c),
-          hint: c.starts_on <= today ? 'current' : c.starts_on.slice(5),
+          hint: { current: 'current', completed: 'completed', upcoming: c.starts_on.slice(5) }[cycleStatus(c, today)],
           icon: <RefreshCcw className="size-4 text-brand-500" />,
         })),
       ]}

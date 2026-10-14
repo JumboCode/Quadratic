@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Plus } from 'lucide-react';
 import { useIssues } from '../../lib/queries';
 import { useUI } from '../../lib/ui-context';
-import { cycleName, todayISO } from '../../lib/utils';
+import { cycleName, isCurrentCycle, todayISO } from '../../lib/utils';
 import { Button, Empty, PageLoader, Select } from '../../components/ui';
 import { applyFilters, emptyFilters, FilterBar, IssueBoard } from '../../components/issue/IssueViews';
 import { useTeamCtx } from './TeamLayout';
@@ -13,7 +13,7 @@ export function Board() {
   const { data: issues = [], isLoading } = useIssues({ teamId: team.id });
   const [filters, setFilters] = useState(emptyFilters);
   const today = todayISO();
-  const current = bundle.cycles.find((c) => c.starts_on <= today && today <= c.ends_on);
+  const current = bundle.cycles.find((c) => isCurrentCycle(c, today));
   const [scope, setScope] = useState<'all' | 'current' | string>('all');
 
   if (isLoading || bundle.loading) return <PageLoader />;

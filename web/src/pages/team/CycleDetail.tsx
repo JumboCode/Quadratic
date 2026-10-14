@@ -110,7 +110,7 @@ export function CycleDetail() {
           <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
             <Stat label="Issues" value={`${done.length}/${live.length}`} />
             <Stat label="Points" value={`${pts(done)}/${scope}`} />
-            <Stat label="Days left" value={isOver ? '0' : String(Math.max(0, days.filter((d) => d >= today).length))} />
+            <Stat label="Days left" value={isOver || cycle.completed_at ? '0' :String(Math.max(0, days.filter((d) => d >= today).length))} />
           </div>
         </Card>
         <Card className="p-4 lg:col-span-2">
