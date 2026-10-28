@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  branchName, buildGithubBody, parseIdentifiers, parseIssueNumbers, stripGithubFooter,
+  branchName, buildGithubBody, parseClosingRefs, parseIdentifiers, parseIssueNumbers, stripGithubFooter,
 } from '../../../supabase/functions/_shared/refs';
 
 describe('parseIssueNumbers', () => {
@@ -12,6 +12,16 @@ describe('parseIssueNumbers', () => {
   });
   it('ignores anchors glued to words', () => {
     expect(parseIssueNumbers('see page#2 and color #fff', 'a/b')).toEqual([]);
+  });
+});
+
+describe('parseClosingRefs', () => {
+  it('only returns references after a closing keyword', () => {
+    const text = 'Fixes #12, part of #13. Closes: WEB-4, see WEB-5. resolved jumbocode/app#6 other/repo#7';
+    expect(parseClosingRefs(text, 'jumbocode/app', ['WEB'])).toEqual({ numbers: [12, 6], identifiers: ['WEB-4'] });
+  });
+  it('ignores bare mentions such as changelogs', () => {
+    expect(parseClosingRefs('Bump lib: crash fix (#5), see #9', 'a/b', ['WEB'])).toEqual({ numbers: [], identifiers: [] });
   });
 });
 

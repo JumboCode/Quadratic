@@ -1,7 +1,7 @@
 // Receives GitHub App webhooks and mirrors issue / comment / PR activity into the planner.
 import { admin, HttpError, json, serve } from '../_shared/http.ts';
-import { botLogin, verifyWebhookSignature } from '../_shared/github.ts';
-import { parseIdentifiers, parseIssueNumbers, stripGithubFooter } from '../_shared/refs.ts';
+import { botLogin, issueSyncArgs, verifyWebhookSignature } from '../_shared/github.ts';
+import { parseClosingRefs, parseIdentifiers, parseIssueNumbers } from '../_shared/refs.ts';
 
 // deno-lint-ignore no-explicit-any
 type Payload = any;
@@ -71,19 +71,10 @@ async function onIssue(repo: Repo, p: Payload) {
       .eq('github_issue_number', p.issue.number);
     return;
   }
-  const issue = p.issue;
   const { error } = await admin.rpc('github_upsert_issue', {
     p_team: repo.team_id,
     p_repo: repo.id,
-    p_number: issue.number,
-    p_github_id: issue.id,
-    p_url: issue.html_url,
-    p_title: issue.title,
-    p_body: stripGithubFooter(issue.body),
-    p_open: issue.state === 'open',
-    p_state_reason: issue.state_reason,
-    p_assignee_login: issue.assignee?.login ?? null,
-    p_label_names: (issue.labels ?? []).map((l: { name: string }) => l.name),
+    ...issueSyncArgs(p.issue),
     p_create_if_missing: true,
   });
   if (error) throw error;
@@ -120,23 +111,30 @@ async function onIssueComment(repo: Repo, p: Payload) {
   if (error) throw error;
 }
 
-async function linkedIssues(repo: Repo, texts: (string | null | undefined)[]) {
-  const numbers = texts.flatMap((t) => parseIssueNumbers(t, repo.full_name));
+async function linkedIssues(repo: Repo, texts: (string | null | undefined)[], branch?: string | null) {
   const { data: teams } = await admin.from('teams').select('key');
-  const identifiers = texts.flatMap((t) => parseIdentifiers(t, (teams ?? []).map((x) => x.key)));
+  const keys = (teams ?? []).map((x) => x.key);
+  const numbers = texts.flatMap((t) => parseIssueNumbers(t, repo.full_name));
+  const identifiers = [...texts, branch].flatMap((t) => parseIdentifiers(t, keys));
+  // Only a closing keyword or the branch name moves an issue; other mentions just link it.
+  const closing = texts.map((t) => parseClosingRefs(t, repo.full_name, keys));
+  const movingNumbers = new Set(closing.flatMap((c) => c.numbers));
+  const movingIdentifiers = new Set([...closing.flatMap((c) => c.identifiers), ...parseIdentifiers(branch, keys)]);
 
-  const found = new Map<string, { id: string; team_id: string }>();
+  const found = new Map<string, { id: string; team_id: string; moves: boolean }>();
   if (numbers.length) {
     const { data } = await admin
       .from('issues')
-      .select('id, team_id')
+      .select('id, team_id, github_issue_number')
       .eq('repo_id', repo.id)
       .in('github_issue_number', numbers);
-    data?.forEach((i) => found.set(i.id, i));
+    data?.forEach((i) => found.set(i.id, { id: i.id, team_id: i.team_id, moves: movingNumbers.has(i.github_issue_number) }));
   }
   if (identifiers.length) {
-    const { data } = await admin.from('issues').select('id, team_id').in('identifier', identifiers);
-    data?.forEach((i) => found.set(i.id, i));
+    const { data } = await admin.from('issues').select('id, team_id, identifier').in('identifier', identifiers);
+    data?.forEach((i) =>
+      found.set(i.id, { id: i.id, team_id: i.team_id, moves: !!found.get(i.id)?.moves || movingIdentifiers.has(i.identifier) })
+    );
   }
   return [...found.values()];
 }
@@ -165,7 +163,7 @@ async function onPullRequest(repo: Repo, p: Payload) {
     .single();
   if (error) throw error;
 
-  const issues = await linkedIssues(repo, [pr.title, pr.body, pr.head?.ref]);
+  const issues = await linkedIssues(repo, [pr.title, pr.body], pr.head?.ref);
   if (issues.length) {
     await admin
       .from('issue_pull_requests')
@@ -191,7 +189,7 @@ async function onPullRequest(repo: Repo, p: Payload) {
     if (mergedToDefault) target = team.pr_merged_state_id;
     else if (p.action === 'review_requested') target = team.pr_review_state_id;
     else if (isOpenEvent && state !== 'closed') target = team.pr_opened_state_id;
-    if (target) await admin.rpc('github_advance_issue', { p_issue: issue.id, p_target_state: target });
+    if (target && issue.moves) await admin.rpc('github_advance_issue', { p_issue: issue.id, p_target_state: target });
 
     if (!['opened', 'reopened', 'ready_for_review', 'review_requested', 'closed'].includes(p.action)) continue;
     await admin.from('activity').insert({

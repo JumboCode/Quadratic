@@ -30,6 +30,22 @@ export function parseIdentifiers(text: string | null | undefined, teamKeys: stri
   return [...found];
 }
 
+/**
+ * References preceded by a GitHub closing keyword ("fixes #12", "Closes WEB-42"). Only these move an
+ * issue when a PR opens or merges; a bare mention ("part of #12", a changelog) just links the PR.
+ */
+export function parseClosingRefs(
+  text: string | null | undefined,
+  repoFullName: string,
+  teamKeys: string[],
+): { numbers: number[]; identifiers: string[] } {
+  if (!text) return { numbers: [], identifiers: [] };
+  const refs = [...text.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s+([\w.\/-]*#\d+|[A-Za-z][A-Za-z0-9]{1,5}-\d+)/gi)]
+    .map((m) => m[1])
+    .join(' ');
+  return { numbers: parseIssueNumbers(refs, repoFullName), identifiers: parseIdentifiers(refs, teamKeys) };
+}
+
 /** Linear-style branch name: "web-42-fix-login-redirect". */
 export function branchName(identifier: string, title: string): string {
   const slug = title
@@ -45,6 +61,10 @@ export function branchName(identifier: string, title: string): string {
 export function buildGithubBody(description: string, identifier: string, url: string): string {
   const footer = `${FOOTER_MARKER}\n---\n<sub>🐘 Tracked in Quadratic as [${identifier}](${url})</sub>`;
   return description.trim() ? `${description.trim()}\n\n${footer}` : footer;
+}
+
+export function hasGithubFooter(body: string | null | undefined): boolean {
+  return !!body?.includes(FOOTER_MARKER);
 }
 
 /** Inverse of buildGithubBody so edits made on GitHub don't accumulate footers. */

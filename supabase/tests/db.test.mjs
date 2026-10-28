@@ -107,7 +107,7 @@ ok((await q(`select count(*)::int c from activity where issue_id = $1 and verb =
 
 console.log('\nGitHub webhook RPCs');
 const [{ github_upsert_issue: ghId }] = await asService(() => q(
-  `select github_upsert_issue($1, $2, 5, 555, 'https://github.com/jumbocode/web/issues/5', 'From GH', 'body', true, null, 'Carol', array['bug','new-label'], true)`,
+  `select github_upsert_issue($1, $2, 5, 555, 'https://github.com/jumbocode/web/issues/5', 'From GH', 'body', false, true, null, array['Carol'], array['bug','new-label'], '2026-10-01T00:00:00Z', true)`,
   [web.id, i2.repo_id],
 ));
 const gh = (await q(`select i.*, s.category from issues i join workflow_states s on s.id = i.state_id where i.id = $1`, [ghId]))[0];
@@ -115,9 +115,9 @@ ok(gh.category === 'triage', 'GitHub-opened issue lands in triage');
 ok((await q(`select name from people where id = $1`, [gh.assignee_id]))[0]?.name === 'Carol', 'unknown assignee auto-added as a person');
 ok((await q(`select count(*)::int c from issue_labels where issue_id = $1`, [ghId]))[0].c === 2, 'labels synced (new label created)');
 ok((await q(`select count(*)::int c from jobs where kind = 'github.upsert_issue' and entity_id = $1`, [ghId]))[0].c === 0, 'no echo back to GitHub');
-await asService(() => q(`select github_upsert_issue($1, $2, 5, 555, 'u', 'From GH', 'body', false, 'not_planned', null, null, false)`, [web.id, i2.repo_id]));
+await asService(() => q(`select github_upsert_issue($1, $2, 5, 555, 'u', 'From GH', 'body', false, false, 'not_planned', array['Carol'], array['bug','new-label'], '2026-10-01T00:01:00Z', false)`, [web.id, i2.repo_id]));
 ok((await q(`select s.category from issues i join workflow_states s on s.id = i.state_id where i.id = $1`, [ghId]))[0].category === 'canceled', 'closed as not planned → Canceled');
-await asService(() => q(`select github_upsert_issue($1, $2, 5, 555, 'u', 'From GH', 'body', true, null, null, null, false)`, [web.id, i2.repo_id]));
+await asService(() => q(`select github_upsert_issue($1, $2, 5, 555, 'u', 'From GH', 'body', false, true, 'reopened', array['Carol'], array['bug','new-label'], '2026-10-01T00:02:00Z', false)`, [web.id, i2.repo_id]));
 ok((await q(`select s.category from issues i join workflow_states s on s.id = i.state_id where i.id = $1`, [ghId]))[0].category === 'unstarted', 'reopened → Todo');
 const moved = (await asService(() => q(`select github_advance_issue($1, $2) r`, [ghId, t.pr_review_state_id])))[0].r;
 const back = (await asService(() => q(`select github_advance_issue($1, $2) r`, [ghId, t.pr_opened_state_id])))[0].r;
@@ -151,6 +151,46 @@ await as(B, () => q(`insert into project_teams values ($1, $2)`, [p.id, web.id])
 ok((await as(B, () => q(`select id from projects`))).length === 1, 'creator sees project');
 ok(await fails(() => as(B, () => q(`insert into project_teams values ($1, $2)`, [p.id, des.id]))), 'cannot attach project to a team you are not on');
 
+console.log('\nGitHub sync merges instead of overwriting');
+// A webhook for GitHub issue #n with the given fields.
+const hook = (n, f) => asService(() => q(
+  `select github_upsert_issue($1, $2, $3, $4, 'u', $5, $6, false, $7, $8, $9, $10, $11, true) id`,
+  [web.id, i2.repo_id, n, 1000 + n, f.title ?? 'T', f.body ?? '', f.open ?? true, f.reason ?? null, f.assignees ?? [], f.labels ?? [], f.at],
+)).then((r) => r[0].id);
+const cat = async (id) => (await q(`select s.category from issues i join workflow_states s on s.id = i.state_id where i.id = $1`, [id]))[0].category;
+const login = async (id) => (await q(`select p.github_login from issues i left join people p on p.id = i.assignee_id where i.id = $1`, [id]))[0].github_login;
+const labelsOf = async (id) => (await q(`select l.name from issue_labels il join labels l on l.id = il.label_id where il.issue_id = $1 order by 1`, [id])).map((r) => r.name);
+
+const g6 = await hook(6, { at: '2026-10-02T00:00:00Z', assignees: ['dana'], labels: ['bug'] });
+ok(await cat(g6) === 'triage', 'new GitHub issue stays open in triage');
+await as(B, () => q(`update issues set state_id = $2 where id = $1`, [g6, done.id]));
+await hook(6, { at: '2026-10-02T00:01:00Z', assignees: ['dana'], labels: ['bug', 'help wanted'] });
+ok(await cat(g6) === 'completed', "unrelated GitHub event (labeled) doesn't undo a lead's queued status change");
+ok((await labelsOf(g6)).join() === 'bug,help wanted', 'label added on GitHub is merged in');
+await as(B, async () => {
+  const [l] = await q(`select id from labels where team_id = $1 and name = 'feature'`, [web.id]);
+  await q(`insert into issue_labels values ($1, $2)`, [g6, l.id]);
+});
+await hook(6, { at: '2026-10-02T00:02:00Z', assignees: ['dana', 'eli'], labels: ['bug', 'help wanted'] });
+ok((await labelsOf(g6)).join() === 'bug,feature,help wanted', 'planner label not yet pushed survives a GitHub event');
+ok(await login(g6) === 'dana', 'a second GitHub assignee does not replace the planner assignee');
+await hook(6, { at: '2026-10-02T00:03:00Z', assignees: ['eli'], labels: ['bug', 'help wanted'] });
+ok(await login(g6) === 'eli', 'removing the planner assignee on GitHub hands it to the remaining one');
+await hook(6, { at: '2026-10-02T00:00:30Z', open: true, assignees: ['dana'], labels: [] });
+ok(await login(g6) === 'eli' && (await labelsOf(g6)).includes('help wanted'), 'out-of-order (older) webhook is ignored');
+await hook(6, { at: '2026-10-02T00:04:00Z', open: false, assignees: ['eli'], labels: ['bug', 'help wanted'] });
+ok(await cat(g6) === 'completed', 'closing on GitHub keeps it closed');
+await hook(6, { at: '2026-10-02T00:05:00Z', open: true, reason: 'reopened', assignees: ['eli'], labels: ['bug', 'help wanted'] });
+ok(await cat(g6) === 'unstarted', 'reopening on GitHub reopens it');
+ok((await q(`select count(*)::int c from jobs where kind = 'github.upsert_issue' and entity_id = $1 and status = 'pending'`, [g6]))[0].c === 1,
+  'only the planner edits are queued for GitHub');
+
+const triage = states.find((s) => s.category === 'triage');
+await q(`update issues set state_id = $2 where state_id = $1`, [triage.id, todo.id]);
+await q(`delete from workflow_states where id = $1`, [triage.id]);
+const g7 = await hook(7, { at: '2026-10-02T00:00:00Z' });
+ok(await cat(g7) === 'backlog', 'team without a Triage status still receives GitHub issues (falls back to Backlog)');
+
 console.log('\nJobs');
 const claimed = await asService(() => q(`select * from claim_jobs(100)`));
 ok(claimed.length > 0 && claimed.every((j) => j.status === 'processing'), `claimed ${claimed.length} jobs`);
@@ -159,6 +199,16 @@ await q(`insert into vault.decrypted_secrets values ('project_url', 'https://x.s
 await q(`select enqueue_job('slack.feed', null, '{}')`);
 ok((await q(`select count(*)::int c from net.calls where url like '%/dispatch'`))[0].c === 1, 'new job kicks the dispatcher via pg_net');
 ok((await q(`select count(*)::int c from cron.jobs`))[0].c === 3, 'cron schedules registered');
+
+console.log('\nJob concurrency');
+await q(`update jobs set status = 'done' where status in ('pending', 'processing')`);
+await q(`select enqueue_job('github.upsert_issue', $1)`, [g7]);
+const [first] = await asService(() => q(`select * from claim_jobs(10)`));
+await q(`select enqueue_job('github.upsert_issue', $1)`, [g7]);
+ok((await asService(() => q(`select * from claim_jobs(10)`))).length === 0, 'second push of an issue waits while the first is still running');
+await q(`update jobs set run_after = now() - interval '1 hour' where id = $1`, [first.id]);
+ok(!(await fails(() => q(`select jobs_maintenance()`))), 'maintenance copes with a stuck job that already has a newer pending one');
+ok((await q(`select count(*)::int c from jobs where entity_id = $1 and status = 'pending'`, [g7]))[0].c === 1, 'exactly one pending push remains');
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll checks passed');
 process.exit(failures ? 1 : 0);

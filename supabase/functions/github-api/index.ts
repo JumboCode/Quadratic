@@ -1,7 +1,6 @@
 // GitHub actions the browser can't do itself (they need the App's private key).
 import { admin, HttpError, json, requireTeamMember, requireUser, serve } from '../_shared/http.ts';
-import { githubApp, installationOctokit, splitRepo } from '../_shared/github.ts';
-import { stripGithubFooter } from '../_shared/refs.ts';
+import { githubApp, installationOctokit, issueSyncArgs, splitRepo } from '../_shared/github.ts';
 
 serve(async (req) => {
   const caller = await requireUser(req);
@@ -66,15 +65,7 @@ serve(async (req) => {
         const { error } = await admin.rpc('github_upsert_issue', {
           p_team: repo.team_id,
           p_repo: repo.id,
-          p_number: issue.number,
-          p_github_id: issue.id,
-          p_url: issue.html_url,
-          p_title: issue.title,
-          p_body: stripGithubFooter(issue.body),
-          p_open: issue.state === 'open',
-          p_state_reason: issue.state_reason ?? null,
-          p_assignee_login: issue.assignee?.login ?? null,
-          p_label_names: issue.labels.map((l: string | { name?: string }) => (typeof l === 'string' ? l : l.name ?? '')).filter(Boolean),
+          ...issueSyncArgs(issue),
           p_create_if_missing: true,
         });
         if (error) throw error;

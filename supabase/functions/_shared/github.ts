@@ -1,6 +1,7 @@
 import { App } from 'npm:@octokit/app@15';
 import { env, HttpError } from './http.ts';
 import { normalizePrivateKey } from './pem.ts';
+import { hasGithubFooter, stripGithubFooter } from './refs.ts';
 
 let app: App | null = null;
 
@@ -25,6 +26,28 @@ export function installationOctokit(installationId: number) {
 /** The bot account our App acts as. Webhooks it triggers are ignored to avoid sync loops. */
 export function botLogin(): string {
   return `${env('GITHUB_APP_SLUG')}[bot]`;
+}
+
+// deno-lint-ignore no-explicit-any
+type GithubIssue = any;
+
+/** Arguments for the github_upsert_issue RPC from a GitHub issue (webhook payload or API response). */
+export function issueSyncArgs(issue: GithubIssue) {
+  return {
+    p_github_id: issue.id,
+    p_number: issue.number,
+    p_url: issue.html_url,
+    p_title: issue.title,
+    p_body: stripGithubFooter(issue.body),
+    p_has_footer: hasGithubFooter(issue.body),
+    p_open: issue.state === 'open',
+    p_state_reason: issue.state_reason ?? null,
+    p_assignee_logins: (issue.assignees ?? []).map((a: { login: string }) => a.login),
+    p_label_names: (issue.labels ?? [])
+      .map((l: string | { name?: string }) => (typeof l === 'string' ? l : l.name ?? ''))
+      .filter(Boolean),
+    p_updated_at: issue.updated_at,
+  };
 }
 
 export function splitRepo(fullName: string): { owner: string; repo: string } {

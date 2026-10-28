@@ -1,8 +1,8 @@
 // Drains the `jobs` outbox: pushes planner changes to GitHub and posts the Slack activity feed.
 // Called by a trigger when jobs are inserted and every minute by pg_cron (for retries).
 import { admin, appUrl, json, requireInternal, serve } from '../_shared/http.ts';
-import { installationOctokit, splitRepo } from '../_shared/github.ts';
-import { buildGithubBody } from '../_shared/refs.ts';
+import { installationOctokit, issueSyncArgs, splitRepo } from '../_shared/github.ts';
+import { buildGithubBody, hasGithubFooter, stripGithubFooter } from '../_shared/refs.ts';
 import { button, context, esc, postMessage, section } from '../_shared/slack.ts';
 
 interface Job {
@@ -66,7 +66,7 @@ async function pushIssue(issueId: string) {
   const { data: issue, error } = await admin
     .from('issues')
     .select(`
-      id, identifier, title, description, github_issue_number,
+      id, team_id, repo_id, identifier, title, description, github_issue_number, github_snapshot,
       repo:repos(full_name, installation_id),
       assignee:people(github_login),
       state:workflow_states(category),
@@ -83,53 +83,115 @@ async function pushIssue(issueId: string) {
   const { owner, repo } = splitRepo(i.repo.full_name);
   const closed = ['completed', 'canceled'].includes(i.state.category);
   const stateReason: 'completed' | 'not_planned' = i.state.category === 'canceled' ? 'not_planned' : 'completed';
-  const params = {
-    owner,
-    repo,
-    title: i.title,
-    body: buildGithubBody(i.description, i.identifier, appUrl(`/issue/${i.identifier}`)),
-    labels: i.labels.map((l: { label: { name: string } }) => l.label.name),
-    assignees: i.assignee?.github_login ? [i.assignee.github_login] : [],
-    state: (closed ? 'closed' : 'open') as 'open' | 'closed',
-  };
+  const body = buildGithubBody(i.description, i.identifier, appUrl(`/issue/${i.identifier}`));
+  const labels: string[] = i.labels.map((l: { label: { name: string } }) => l.label.name);
+  const login: string | null = i.assignee?.github_login?.toLowerCase() ?? null;
 
-  // Assigning someone without repo access fails with 422; retry without the assignee.
-  const send = async (p: typeof params) => {
-    if (i.github_issue_number) {
-      return octokit.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', {
-        ...p,
-        issue_number: i.github_issue_number,
-        state_reason: p.state === 'closed' ? stateReason : undefined,
-      });
-    }
+  if (!i.github_issue_number) {
     // GitHub can't create an issue already closed, so close it right after.
-    const { state, ...create } = p;
-    const res = await octokit.request('POST /repos/{owner}/{repo}/issues', create);
-    if (state === 'closed') {
-      await octokit.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', {
+    const create = { owner, repo, title: i.title, body, labels, assignees: login ? [login] : [] };
+    let res;
+    try {
+      res = await octokit.request('POST /repos/{owner}/{repo}/issues', create);
+    } catch (e) {
+      // Assigning someone without repo access fails with 422; create it unassigned.
+      if ((e as { status?: number }).status !== 422 || !login) throw e;
+      res = await octokit.request('POST /repos/{owner}/{repo}/issues', { ...create, assignees: [] });
+    }
+    if (closed) {
+      res = await octokit.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', {
         owner, repo, issue_number: res.data.number, state: 'closed', state_reason: stateReason,
       });
     }
-    return res;
-  };
-
-  let res;
-  try {
-    res = await send(params);
-  } catch (e) {
-    if ((e as { status?: number }).status !== 422 || params.assignees.length === 0) throw e;
-    res = await send({ ...params, assignees: [] });
+    const { error: linkError } = await admin
+      .from('issues')
+      .update({
+        github_issue_number: res.data.number,
+        github_issue_id: res.data.id,
+        github_url: res.data.html_url,
+        github_snapshot: { ...snapshotOf(res.data, login), updated_at: res.data.updated_at },
+        last_synced_at: new Date().toISOString(),
+      })
+      .eq('id', issueId);
+    if (linkError) throw linkError; // surface it in jobs.last_error instead of leaving the issue unlinked
+    return;
   }
 
-  await admin
-    .from('issues')
-    .update({
-      github_issue_number: res.data.number,
-      github_issue_id: res.data.id,
-      github_url: res.data.html_url,
-      last_synced_at: new Date().toISOString(),
-    })
-    .eq('id', issueId);
+  // Only send what changed in the planner since GitHub's last known version, so edits devs made on
+  // GitHub (extra assignees, labels, wording) are never overwritten with a stale copy.
+  const issue_number = i.github_issue_number;
+  const snap = i.github_snapshot ?? snapshotOf(
+    (await octokit.request('GET /repos/{owner}/{repo}/issues/{issue_number}', { owner, repo, issue_number })).data,
+    login,
+  );
+  let latest = null;
+
+  const removeLabels = snap.labels.filter((l: string) => !labels.includes(l));
+  const addLabels = labels.filter((l) => !snap.labels.includes(l));
+  for (const name of removeLabels) {
+    try {
+      await octokit.request('DELETE /repos/{owner}/{repo}/issues/{issue_number}/labels/{name}', { owner, repo, issue_number, name });
+    } catch (e) {
+      if ((e as { status?: number }).status !== 404) throw e; // already gone
+    }
+  }
+  if (addLabels.length) {
+    await octokit.request('POST /repos/{owner}/{repo}/issues/{issue_number}/labels', { owner, repo, issue_number, labels: addLabels });
+  }
+
+  // The planner's single assignee maps to one GitHub assignee (snap.assignee); others are left alone.
+  if (snap.assignee && snap.assignee !== login) {
+    latest = (await octokit.request('DELETE /repos/{owner}/{repo}/issues/{issue_number}/assignees', {
+      owner, repo, issue_number, assignees: [snap.assignee],
+    })).data;
+  }
+  if (login && !snap.assignees.includes(login)) {
+    // GitHub silently skips people without repo access instead of failing.
+    latest = (await octokit.request('POST /repos/{owner}/{repo}/issues/{issue_number}/assignees', {
+      owner, repo, issue_number, assignees: [login],
+    })).data;
+  }
+
+  const patch: Record<string, unknown> = {};
+  if (i.title !== snap.title) patch.title = i.title;
+  if (i.description.trim() !== snap.body || !snap.footer) patch.body = body;
+  if (closed === snap.open) {
+    patch.state = closed ? 'closed' : 'open';
+    if (closed) patch.state_reason = stateReason;
+  }
+  if (Object.keys(patch).length) {
+    latest = (await octokit.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', { owner, repo, issue_number, ...patch })).data;
+  } else if (removeLabels.length || addLabels.length) {
+    latest = (await octokit.request('GET /repos/{owner}/{repo}/issues/{issue_number}', { owner, repo, issue_number })).data;
+  }
+  if (latest) await recordSynced(i, latest);
+}
+
+/** What GitHub shows now, in the shape of issues.github_snapshot. */
+// deno-lint-ignore no-explicit-any
+function snapshotOf(gh: any, plannerLogin: string | null) {
+  const assignees: string[] = (gh.assignees ?? []).map((a: { login: string }) => a.login.toLowerCase());
+  return {
+    title: gh.title,
+    body: stripGithubFooter(gh.body),
+    footer: hasGithubFooter(gh.body),
+    open: gh.state === 'open',
+    labels: (gh.labels ?? []).map((l: string | { name?: string }) => (typeof l === 'string' ? l : l.name ?? '')),
+    assignees,
+    assignee: plannerLogin && assignees.includes(plannerLogin) ? plannerLogin : null,
+  };
+}
+
+/** Store GitHub's resulting issue as the new snapshot, merging in anything a dev changed meanwhile. */
+// deno-lint-ignore no-explicit-any
+async function recordSynced(i: any, gh: any) {
+  const { error } = await admin.rpc('github_upsert_issue', {
+    p_team: i.team_id,
+    p_repo: i.repo_id,
+    ...issueSyncArgs(gh),
+    p_create_if_missing: false,
+  });
+  if (error) throw error;
 }
 
 async function pushComment(commentId: string) {
